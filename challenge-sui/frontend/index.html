@@ -12,7 +12,7 @@
   .subtitle { color:#9ca3af; font-size:0.875rem; margin-bottom:2rem; }
   .card { background:#141416; border:1px solid #27272a; border-radius:12px; padding:1.5rem; margin-bottom:1rem; }
   .card-title { font-size:0.875rem; font-weight:600; color:#a1a1aa; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:1rem; }
-  button { background:#2563eb; color:#fff; border:none; border-radius:8px; padding:0.625rem 1.25rem; font-size:0.875rem; font-weight:500; cursor:pointer; }
+  button { background:#2563eb; color:#fff; border:none; border-radius:8px; padding:0.625rem 1.25rem; font-size:0.875rem; font-weight:500; cursor:pointer; transition:background 0.2s; }
   button:hover { background:#1d4ed8; }
   button:disabled { background:#3f3f46; cursor:not-allowed; }
   .uuid-display { font-family:monospace; background:#1a1a1e; padding:0.75rem; border-radius:8px; font-size:0.875rem; word-break:break-all; margin-bottom:1rem; }
@@ -25,13 +25,19 @@
   input[type="file"] { display:block; width:100%; padding:0.75rem; background:#1a1a1e; border:1px dashed #3f3f46; border-radius:8px; color:#9ca3af; font-size:0.875rem; cursor:pointer; margin-bottom:1rem; }
   .spinner { display:inline-block; width:1rem; height:1rem; border:2px solid #93c5fd; border-top-color:transparent; border-radius:50%; animation:spin 0.6s linear infinite; margin-right:0.5rem; vertical-align:middle; }
   @keyframes spin { to { transform:rotate(360deg); } }
+  .pow-hash { font-family:monospace; font-size:0.75rem; color:#71717a; word-break:break-all; margin-top:0.5rem; }
 </style>
 </head>
 <body>
 <div class="container">
   <h1>Sui CTF Challenge</h1>
   <p class="subtitle">Submit your solution <code>.move</code> file to solve the challenge</p>
-  <div class="card" id="launch-card">
+  <div class="card" id="pow-card">
+    <div class="card-title">Proof of Work</div>
+    <p id="pow-status" style="font-size:0.875rem;color:#9ca3af;">Preparing...</p>
+    <div class="pow-hash" id="pow-detail"></div>
+  </div>
+  <div class="card" id="launch-card" style="display:none">
     <div class="card-title">Instance</div>
     <button id="launch-btn">Launch Instance</button>
   </div>
@@ -51,52 +57,129 @@
 </div>
 <script>
 const API="";
-document.getElementById("launch-btn").onclick=async()=>{
-  const r=await fetch("./launch",{method:"POST"});
-  const d=await r.json();
-  if(d.uuid){
-    document.getElementById("launch-card").style.display="none";
-    document.getElementById("solution-card").classList.remove("hidden");
-    document.getElementById("uuid-display").textContent=d.uuid;
-    document.getElementById("solution-card").dataset.uuid=d.uuid;
+
+async function solvePow(challengeStr) {
+  const parts = challengeStr.split(".");
+  const d = parseInt(parts[1]);
+  const prefix = parts[2];
+  const target = "0".repeat(d);
+  let i = 0;
+  while (true) {
+    const h = await sha256(prefix + i);
+    if (h.startsWith(target)) return "s." + i;
+    i++;
   }
-};
-document.getElementById("submit-btn").onclick=async()=>{
-  const u=document.getElementById("solution-card").dataset.uuid;
-  const f=document.getElementById("solution-file").files[0];
-  if(!f)return alert("Select a .move file first");
-  const btn=document.getElementById("submit-btn");
-  btn.disabled=true;
-  showResult("pending","<span class=\"spinner\"></span> Verifying...");
-  const fd=new FormData(); fd.append("file",f);
+}
+
+async function sha256(str) {
+  const buf = new TextEncoder().encode(str);
+  const hash = await crypto.subtle.digest("SHA-256", buf);
+  return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2,"0")).join("");
+}
+
+let ticket = null;
+
+(async function() {
+  const status = document.getElementById("pow-status");
+  const detail = document.getElementById("pow-detail");
+
   try {
-    const r=await fetch("./submit-solution/"+u,{method:"POST",body:fd});
-    const d=await r.json();
-    if(d.solved){
-      showResult("success","Challenge solved!");
+    const r = await fetch(API + "/solution");
+    const d = await r.json();
+    if (d.challenge) {
+      detail.textContent = "Challenge: " + d.challenge;
+      status.innerHTML = '<span class="spinner"></span> Solving proof of work...';
+
+      const sol = await solvePow(d.challenge);
+      detail.textContent += " → solved with " + sol.substring(0, 10) + "...";
+
+      const r2 = await fetch(API + "/solution", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({challenge: d.challenge, solution: sol})
+      });
+      const d2 = await r2.json();
+
+      if (d2.ticket) {
+        ticket = d2.ticket;
+        status.textContent = "Proof of work solved!";
+        status.style.color = "#86efac";
+        document.getElementById("pow-card").className = "card result success";
+        document.getElementById("launch-card").style.display = "block";
+      } else {
+        status.textContent = "PoW failed: " + (d2.error || "unknown");
+        status.style.color = "#fca5a5";
+      }
+    } else {
+      status.textContent = "Failed to get PoW challenge";
+      status.style.color = "#fca5a5";
+    }
+  } catch (e) {
+    status.textContent = "Error: " + e.message;
+    status.style.color = "#fca5a5";
+  }
+})();
+
+document.getElementById("launch-btn").onclick = async function() {
+  if (!ticket) return;
+  const btn = this;
+  btn.disabled = true;
+  btn.textContent = "Launching...";
+
+  const r = await fetch(API + "/launch", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ticket})
+  });
+  const d = await r.json();
+
+  if (d.uuid) {
+    document.getElementById("launch-card").style.display = "none";
+    document.getElementById("solution-card").classList.remove("hidden");
+    document.getElementById("uuid-display").textContent = d.uuid;
+    document.getElementById("solution-card").dataset.uuid = d.uuid;
+  } else {
+    showResult("error", d.error || "Launch failed");
+  }
+  btn.disabled = false;
+  btn.textContent = "Launch Instance";
+};
+
+document.getElementById("submit-btn").onclick = async function() {
+  const u = document.getElementById("solution-card").dataset.uuid;
+  const f = document.getElementById("solution-file").files[0];
+  if (!f) return alert("Select a .move file first");
+  const btn = this;
+  btn.disabled = true;
+  showResult("pending", '<span class="spinner"></span> Verifying...');
+  const fd = new FormData(); fd.append("file", f);
+  try {
+    const r = await fetch(API + "/submit-solution/" + u, {method: "POST", body: fd});
+    const d = await r.json();
+    if (d.solved) {
+      showResult("success", "Challenge solved!");
       document.getElementById("flag-btn").classList.remove("hidden");
     } else {
-      showResult("error",d.message||"Solution not correct");
+      showResult("error", d.message || "Solution not correct");
     }
-  } catch(e){
-    showResult("error","Network error: "+e.message);
-  } finally {
-    btn.disabled=false;
-  }
+  } catch(e) { showResult("error", "Network error: " + e.message); }
+  finally { btn.disabled = false; }
 };
-document.getElementById("flag-btn").onclick=async()=>{
-  const u=document.getElementById("solution-card").dataset.uuid;
-  showResult("pending","<span class=\"spinner\"></span> Fetching flag...");
-  const r=await fetch("./flag/"+u);
-  const d=await r.json();
-  if(d.flag) showResult("success","Flag: "+d.flag);
-  else showResult("error",d.error||"Not solved");
+
+document.getElementById("flag-btn").onclick = async function() {
+  const u = document.getElementById("solution-card").dataset.uuid;
+  showResult("pending", '<span class="spinner"></span> Fetching flag...');
+  const r = await fetch(API + "/flag/" + u);
+  const d = await r.json();
+  if (d.flag) showResult("success", "Flag: " + d.flag);
+  else showResult("error", d.error || "Not solved");
 };
-function showResult(t,m){
-  const c=document.getElementById("result-card"),e=document.getElementById("result-message");
-  c.style.display="block"; e.innerHTML=m;
-  c.style.borderColor=t=="success"?"#166534":t=="pending"?"#2563eb":"#7f1d1d";
-  e.style.color=t=="success"?"#86efac":t=="pending"?"#93c5fd":"#fca5a5";
+
+function showResult(t, m) {
+  const c = document.getElementById("result-card"), e = document.getElementById("result-message");
+  c.style.display = "block"; e.innerHTML = m;
+  c.style.borderColor = t=="success" ? "#166534" : t=="pending" ? "#2563eb" : "#7f1d1d";
+  e.style.color = t=="success" ? "#86efac" : t=="pending" ? "#93c5fd" : "#fca5a5";
 }
 </script>
 </body>
