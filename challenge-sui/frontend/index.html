@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sui CTF Launcher</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#0a0a0b; color:#e5e7eb; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; min-height:100vh; display:flex; align-items:center; justify-content:center; }
+  .container { width:100%; max-width:640px; padding:2rem; }
+  h1 { font-size:1.5rem; font-weight:600; margin-bottom:0.5rem; color:#f3f4f6; }
+  .subtitle { color:#9ca3af; font-size:0.875rem; margin-bottom:2rem; }
+  .card { background:#141416; border:1px solid #27272a; border-radius:12px; padding:1.5rem; margin-bottom:1rem; }
+  .card-title { font-size:0.875rem; font-weight:600; color:#a1a1aa; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:1rem; }
+  button { background:#2563eb; color:#fff; border:none; border-radius:8px; padding:0.625rem 1.25rem; font-size:0.875rem; font-weight:500; cursor:pointer; }
+  button:hover { background:#1d4ed8; }
+  button:disabled { background:#3f3f46; cursor:not-allowed; }
+  .uuid-display { font-family:monospace; background:#1a1a1e; padding:0.75rem; border-radius:8px; font-size:0.875rem; word-break:break-all; margin-bottom:1rem; }
+  .result { padding:1rem; border-radius:8px; margin-top:1rem; font-size:0.875rem; display:none; }
+  .result.success { display:block; background:#052e16; border:1px solid #166534; color:#86efac; }
+  .result.error { display:block; background:#450a0a; border:1px solid #7f1d1d; color:#fca5a5; }
+  .result.pending { display:block; background:#1e3a5f; border:1px solid #2563eb; color:#93c5fd; }
+  .hidden { display:none; }
+  .flex-row { display:flex; gap:0.5rem; align-items:center; }
+  input[type="file"] { display:block; width:100%; padding:0.75rem; background:#1a1a1e; border:1px dashed #3f3f46; border-radius:8px; color:#9ca3af; font-size:0.875rem; cursor:pointer; margin-bottom:1rem; }
+  .spinner { display:inline-block; width:1rem; height:1rem; border:2px solid #93c5fd; border-top-color:transparent; border-radius:50%; animation:spin 0.6s linear infinite; margin-right:0.5rem; vertical-align:middle; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Sui CTF Challenge</h1>
+  <p class="subtitle">Submit your solution <code>.move</code> file to solve the challenge</p>
+  <div class="card" id="launch-card">
+    <div class="card-title">Instance</div>
+    <button id="launch-btn">Launch Instance</button>
+  </div>
+  <div id="solution-card" class="card hidden">
+    <div class="card-title">Solution</div>
+    <div class="uuid-display" id="uuid-display"></div>
+    <input type="file" id="solution-file" accept=".move">
+    <div class="flex-row">
+      <button id="submit-btn">Submit Solution</button>
+      <button id="flag-btn" class="hidden">Get Flag</button>
+    </div>
+  </div>
+  <div class="card" id="result-card" style="display:none">
+    <div class="card-title">Result</div>
+    <div id="result-message"></div>
+  </div>
+</div>
+<script>
+const API="";
+document.getElementById("launch-btn").onclick=async()=>{
+  const r=await fetch("./launch",{method:"POST"});
+  const d=await r.json();
+  if(d.uuid){
+    document.getElementById("launch-card").style.display="none";
+    document.getElementById("solution-card").classList.remove("hidden");
+    document.getElementById("uuid-display").textContent=d.uuid;
+    document.getElementById("solution-card").dataset.uuid=d.uuid;
+  }
+};
+document.getElementById("submit-btn").onclick=async()=>{
+  const u=document.getElementById("solution-card").dataset.uuid;
+  const f=document.getElementById("solution-file").files[0];
+  if(!f)return alert("Select a .move file first");
+  const btn=document.getElementById("submit-btn");
+  btn.disabled=true;
+  showResult("pending","<span class=\"spinner\"></span> Verifying...");
+  const fd=new FormData(); fd.append("file",f);
+  try {
+    const r=await fetch("./submit-solution/"+u,{method:"POST",body:fd});
+    const d=await r.json();
+    if(d.solved){
+      showResult("success","Challenge solved!");
+      document.getElementById("flag-btn").classList.remove("hidden");
+    } else {
+      showResult("error",d.message||"Solution not correct");
+    }
+  } catch(e){
+    showResult("error","Network error: "+e.message);
+  } finally {
+    btn.disabled=false;
+  }
+};
+document.getElementById("flag-btn").onclick=async()=>{
+  const u=document.getElementById("solution-card").dataset.uuid;
+  showResult("pending","<span class=\"spinner\"></span> Fetching flag...");
+  const r=await fetch("./flag/"+u);
+  const d=await r.json();
+  if(d.flag) showResult("success","Flag: "+d.flag);
+  else showResult("error",d.error||"Not solved");
+};
+function showResult(t,m){
+  const c=document.getElementById("result-card"),e=document.getElementById("result-message");
+  c.style.display="block"; e.innerHTML=m;
+  c.style.borderColor=t=="success"?"#166534":t=="pending"?"#2563eb":"#7f1d1d";
+  e.style.color=t=="success"?"#86efac":t=="pending"?"#93c5fd":"#fca5a5";
+}
+</script>
+</body>
+</html>
