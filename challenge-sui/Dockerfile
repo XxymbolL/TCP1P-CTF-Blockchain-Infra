@@ -1,6 +1,6 @@
 FROM ubuntu:24.04
 
-RUN apt update && apt install -y curl python3 python3-pip tini build-essential && rm -rf /var/lib/apt/lists/*
+RUN apt update && apt install -y curl python3 python3-pip tini build-essential git && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /var/log/ctf
 
