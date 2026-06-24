@@ -83,11 +83,15 @@ def solve_solution():
         return {"error": str(e)}, 400
 @app.route("/launch", methods=["POST"])
 def launch():
+    ticket = request.headers.get("X-Ticket") or (request.get_json() or {}).get("ticket")
+    if not ticket or not store.get(f"ticket_{ticket}"):
+        return jsonify({"error": "Solve the PoW challenge first at /solution"}), 403
+    store.set(f"ticket_{ticket}", None)
     session_id = str(uuid4())
     store.set(f"session_{session_id}", {"solved": False})
     return jsonify({
         "uuid": session_id,
-        "message": "Instance created. Upload your solution .mv file to /submit-solution/<uuid>",
+        "message": "Instance created. Upload your solution .move file to /submit-solution/<uuid>",
         "challenge_address": "0x0",
     })
 
