@@ -75,14 +75,14 @@ def _do_verify(challenge_dir, solution_file, flag):
 
         build = subprocess.run(
             ["sui", "move", "build", "--path", str(tmp)],
-            capture_output=True, text=True, timeout=120
+            capture_output=True, text=True, timeout=300
         )
         if build.returncode != 0:
             return {"solved": False, "message": "Build failed:\n" + build.stderr[:2000]}
 
         test = subprocess.run(
             ["sui", "move", "test", "--path", str(tmp)],
-            capture_output=True, text=True, timeout=120
+            capture_output=True, text=True, timeout=300
         )
         if test.returncode == 0:
             return {"solved": True, "message": "Congrats, flag: " + flag}
