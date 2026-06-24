@@ -1,17 +1,11 @@
 import base64
 import os
 import struct
+from Crypto.Util.number import bytes_to_long, long_to_bytes
 
 VERSION = "s"
 MOD = 2 ** 1279 - 1
 EXP = 2 ** 1277
-
-def bytes_to_long(b):
-    return int.from_bytes(b, "big")
-
-def long_to_bytes(n):
-    return n.to_bytes((n.bit_length() + 7) // 8, "big")
-
 
 class Challenge:
     def __init__(self, d, x):
@@ -30,8 +24,9 @@ class Challenge:
         return cls(d, x)
 
     @classmethod
-    def generate(cls, d=16):
-        return cls(d, bytes_to_long(os.urandom(16)))
+    def generate(cls, d):
+        x = bytes_to_long(os.urandom(16))
+        return cls(d, x)
 
     def __str__(self):
         d_bytes = struct.pack(">I", self.d)
@@ -44,7 +39,6 @@ class Challenge:
             x ^= 1
             x = pow(x, 2, MOD)
         return f"{VERSION}.{base64.standard_b64encode(long_to_bytes(x)).decode()}"
-
 
 def decode_solution(s):
     parts = s.split(".", 1)
