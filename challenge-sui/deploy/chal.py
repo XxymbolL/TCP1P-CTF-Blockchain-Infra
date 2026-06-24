@@ -42,7 +42,7 @@ app.config.update(
 FLAG = os.getenv("FLAG", "PCTF{placeholder}")
 CHALLENGE_DIR = Path("/home/ctf/setup")
 SOLVER_SCRIPT = Path("/home/ctf/solver/verify.py")
-FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
+FRONTEND_DIR = Path(__file__).parent / "frontend"
 store = PersistentStore("/tmp/sui_state.pickle")
 
 @app.route("/")
