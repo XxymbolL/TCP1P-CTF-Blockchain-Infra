@@ -8,6 +8,7 @@ from uuid import uuid4
 from pathlib import Path
 from typing import Any, Optional
 
+from ppow import Challenge, check as pow_check
 from flask import Flask, request, jsonify, send_from_directory
 
 class PersistentStore:
@@ -60,6 +61,26 @@ def challenge():
         "description": "Upload your compiled solution .mv file to solve the challenge."
     })
 
+
+@app.route("/solution", methods=["GET"])
+def get_solution():
+    chal = Challenge.generate(5)
+    return {"challenge": str(chal)}
+
+@app.route("/solution", methods=["POST"])
+def solve_solution():
+    data = request.get_json()
+    if not data or "solution" not in data or "challenge" not in data:
+        return {"error": "Missing solution or challenge"}, 400
+    try:
+        chal = Challenge.from_string(data["challenge"])
+        if pow_check(chal, data["solution"]):
+            ticket = os.urandom(16).hex()
+            store.set(f"ticket_{ticket}", True)
+            return {"ticket": ticket}
+        return {"error": "Invalid solution"}, 400
+    except Exception as e:
+        return {"error": str(e)}, 400
 @app.route("/launch", methods=["POST"])
 def launch():
     session_id = str(uuid4())

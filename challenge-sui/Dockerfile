@@ -23,6 +23,7 @@ COPY challenge-sui/setup setup
 COPY challenge-sui/solver solver
 COPY challenge-sui/frontend frontend
 COPY challenge-sui/deploy .
+COPY challenge-sui/ppow.py .
 
 EXPOSE 8080
 
