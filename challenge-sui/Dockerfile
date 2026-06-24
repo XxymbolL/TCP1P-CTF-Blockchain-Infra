@@ -17,6 +17,9 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
     tar xzf "$BIN" -C /usr/local/bin/ --strip-components=1 && \
     rm "$BIN"
 
+# Pre-cache Move dependencies by building the challenge
+RUN cd setup && sui move build 2>&1 || true
+
 WORKDIR /home/ctf/
 
 COPY challenge-sui/setup setup
