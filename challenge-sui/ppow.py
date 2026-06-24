@@ -1,37 +1,66 @@
-import hashlib, os
+import base64
+import os
+import struct
 
 VERSION = "s"
+MOD = 2 ** 1279 - 1
+EXP = 2 ** 1277
+
+def bytes_to_long(b):
+    return int.from_bytes(b, "big")
+
+def long_to_bytes(n):
+    return n.to_bytes((n.bit_length() + 7) // 8, "big")
+
 
 class Challenge:
-    def __init__(self, d, prefix):
+    def __init__(self, d, x):
         self.d = d
-        self.prefix = prefix
-
-    @classmethod
-    def generate(cls, d=5):
-        return cls(d, os.urandom(8).hex())
+        self.x = x
 
     @classmethod
     def from_string(cls, v):
         parts = v.split(".", 2)
         if len(parts) != 3 or parts[0] != VERSION:
             raise ValueError("Incorrect version")
-        return cls(int(parts[1]), parts[2])
+        d_bytes = base64.standard_b64decode(parts[1])
+        d = struct.unpack(">I", d_bytes)[0]
+        x_bytes = base64.standard_b64decode(parts[2])
+        x = bytes_to_long(x_bytes)
+        return cls(d, x)
+
+    @classmethod
+    def generate(cls, d=16):
+        return cls(d, bytes_to_long(os.urandom(16)))
 
     def __str__(self):
-        return f"{VERSION}.{self.d}.{self.prefix}"
+        d_bytes = struct.pack(">I", self.d)
+        x_bytes = long_to_bytes(self.x)
+        return f"{VERSION}.{base64.standard_b64encode(d_bytes).decode()}.{base64.standard_b64encode(x_bytes).decode()}"
 
     def solve(self):
-        i = 0
-        target = "0" * self.d
-        while True:
-            if hashlib.sha256(f"{self.prefix}{i}".encode()).hexdigest().startswith(target):
-                return f"{VERSION}.{i}"
-            i += 1
+        x = pow(self.x, EXP, MOD)
+        for _ in range(self.d):
+            x ^= 1
+            x = pow(x, 2, MOD)
+        return f"{VERSION}.{base64.standard_b64encode(long_to_bytes(x)).decode()}"
 
-def check(challenge, s):
+
+def decode_solution(s):
     parts = s.split(".", 1)
     if len(parts) != 2 or parts[0] != VERSION:
-        return False
-    i = int(parts[1])
-    return hashlib.sha256(f"{challenge.prefix}{i}".encode()).hexdigest().startswith("0" * challenge.d)
+        raise ValueError("Incorrect version")
+    y_bytes = base64.standard_b64decode(parts[1])
+    return bytes_to_long(y_bytes)
+
+
+def check(challenge, s):
+    y = decode_solution(s)
+    for _ in range(challenge.d):
+        y ^= 1
+        y = pow(y, 2, MOD)
+    x = challenge.x
+    if x == y:
+        return True
+    x = (MOD - challenge.x) % MOD
+    return x == y
