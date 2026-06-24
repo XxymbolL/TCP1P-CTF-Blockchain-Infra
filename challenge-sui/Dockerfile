@@ -5,7 +5,7 @@ RUN apt update && apt install -y curl python3 python3-pip tini build-essential g
 RUN mkdir -p /var/log/ctf
 
 RUN python3 -m pip install --no-cache-dir --break-system-packages \
-    Flask==3.1.0 gunicorn==23.0.0 pycryptodome==3.22.0
+    Flask==3.1.0 gunicorn==23.0.0
 
 ARG TARGETARCH
 RUN if [ "$TARGETARCH" = "arm64" ]; then \
