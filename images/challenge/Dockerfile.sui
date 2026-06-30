@@ -1,0 +1,23 @@
+FROM gcr.io/paradigmxyz/ctf/base:latest
+
+ARG TARGETARCH
+
+RUN apt-get update \
+    && apt-get install -y curl ca-certificates git \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN set -eux; \
+    case "${TARGETARCH}" in \
+      amd64) sui_arch="x86_64" ;; \
+      arm64) sui_arch="aarch64" ;; \
+      *) echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    curl -L "https://github.com/MystenLabs/sui/releases/download/mainnet-v1.72.2/sui-mainnet-v1.72.2-ubuntu-${sui_arch}.tgz" \
+    | tar -xz -C /usr/local/bin --strip-components=1 ./sui \
+        ./sui-faucet ./sui-node ./sui-tool
+
+ENV PYTHONPATH=/usr/lib/python
+ENV BLOCKCHAIN_TYPE=sui
+
+COPY 96-start-launcher /startup
+COPY src/sandbox /usr/lib/python/sandbox

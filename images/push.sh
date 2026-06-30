@@ -7,9 +7,9 @@ fi
 
 VERSION=$1
 
-for IMAGE in cairo eth solana; do
-  sudo docker tag dimasmaualana/$IMAGE:latest dimasmaualana/$IMAGE:$VERSION
-  sudo docker push dimasmaualana/$IMAGE:$VERSION
-  sudo docker push dimasmaualana/$IMAGE:latest
-  echo "Pushed dimasmaualana/$IMAGE:latest and :$VERSION"
+for IMAGE in cairo eth solana sui; do
+  sudo docker tag xxymboll/$IMAGE:latest xxymboll/$IMAGE:$VERSION
+  sudo docker push xxymboll/$IMAGE:$VERSION
+  sudo docker push xxymboll/$IMAGE:latest
+  echo "Pushed xxymboll/$IMAGE:latest and :$VERSION"
 done

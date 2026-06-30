@@ -1,4 +1,4 @@
-FROM dimasmaualana/cairo:latest
+FROM xxymboll/cairo:latest
 
 COPY ./deploy/ /home/ctf/
 COPY ./contracts/ /home/ctf/contracts/

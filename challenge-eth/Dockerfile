@@ -1,4 +1,4 @@
-FROM dimasmaualana/eth:latest
+FROM xxymboll/eth:latest
 
 COPY deploy/ /home/ctf/
 

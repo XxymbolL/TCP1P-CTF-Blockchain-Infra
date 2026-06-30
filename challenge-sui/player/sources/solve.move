@@ -1,11 +1,12 @@
 /// Player solution module.
-/// The server compiles this with the challenge and runs a test to verify it solves.
+/// This module demonstrates how a player would interact with the challenge
+/// via the Sui CLI or SDK. The actual solve is done via on-chain transaction.
+///
+/// Usage via Sui CLI:
+///   sui client call --package <PACKAGE_ID> --module challenge \\
+///     --function solve --args <CHALLENGE_OBJECT_ID> <ANSWER> --gas-budget 10000000
 module solution::solve {
-    use challenge::challenge;
-    use sui::tx_context::TxContext;
-
-    /// Your exploit: receive the Challenge object and solve it.
-    public fun solve(challenge: &mut challenge::Challenge, _ctx: &mut TxContext) {
-        challenge::solve(challenge, _ctx);
-    }
+    // This file serves as documentation for players.
+    // The challenge is solved by calling challenge::challenge::solve(challenge_obj, 42)
+    // directly on-chain via Sui CLI or SDK — not by compiling this module.
 }

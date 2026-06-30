@@ -8,6 +8,7 @@ import random
 import signal
 import asyncio
 import subprocess
+from pathlib import Path
 from threading import Thread
 from typing import Callable, Literal
 from uuid import uuid4
@@ -23,8 +24,14 @@ from starknet_py.net.account.account import Account as CairoAccount, KeyPair as 
 from starknet_py.net.full_node_client import FullNodeClient as CairoFullNodeClient
 from solana.rpc.async_api import AsyncClient as SolanaClient
 
+import requests
+
 from sandbox.helper import FileLock, PersistentStore
 from .solana_helper import is_solved as solana_is_solved
+from .sui_helper import check_solved as sui_check_solved
+from .sui_helper import fund_account as sui_fund_account
+from .sui_helper import wait_for_rpc as sui_wait_for_rpc
+from .sui_helper import write_client_config as sui_write_client_config
 
 EthAccount.enable_unaudited_hdwallet_features()
 
@@ -149,7 +156,16 @@ def terminate_node_process(node_info: NodeInfo):
     print(f"Terminating node {node_info.team} {node_info.uuid}")
     remove_instance_data(node_info)
     if BLOCKCHAIN_TYPE != "solana":
-        os.kill(node_info.pid, signal.SIGTERM)
+        if BLOCKCHAIN_TYPE == "sui":
+            try:
+                os.killpg(os.getpgid(node_info.pid), signal.SIGTERM)
+            except Exception:
+                try:
+                    os.kill(node_info.pid, signal.SIGTERM)
+                except Exception:
+                    pass
+        else:
+            os.kill(node_info.pid, signal.SIGTERM)
 
 def schedule_node_termination(node_info: NodeInfo):
     def termination_task():
@@ -329,9 +345,145 @@ async def launch_solana_node(team_id: str) -> NodeInfo:
     schedule_node_termination(node_info)
     return node_info
 
+def launch_sui_node(team_id: str) -> NodeInfo:
+    import socket
+    import subprocess
+    import time
+
+    def _find_free_port():
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("127.0.0.1", 0))
+            return s.getsockname()[1]
+
+    rpc_port = _find_free_port()
+    faucet_port = _find_free_port()
+    node_uuid = str(uuid4())
+
+    config_dir = Path(f"/tmp/sui-{node_uuid}")
+    config_dir.mkdir(parents=True, exist_ok=True)
+
+    log_dir = config_dir / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    rpc_url = f"http://127.0.0.1:{rpc_port}"
+    faucet_url = f"http://127.0.0.1:{faucet_port}"
+
+    with open(log_dir / "sui.stdout.log", "ab") as stdout, \
+         open(log_dir / "sui.stderr.log", "ab") as stderr:
+        sui_process = subprocess.Popen(
+            [
+                "sui", "start",
+                f"--with-faucet=0.0.0.0:{faucet_port}",
+                "--fullnode-rpc-port", str(rpc_port),
+            ],
+            stdout=stdout,
+            stderr=stderr,
+            start_new_session=True,
+        )
+
+    try:
+        sui_wait_for_rpc(rpc_url, timeout=120)
+    except Exception:
+        try:
+            os.killpg(os.getpgid(sui_process.pid), signal.SIGTERM)
+        except Exception:
+            pass
+        raise
+
+    import tempfile as _tempfile
+    with _tempfile.TemporaryDirectory() as _td:
+        admin_result = subprocess.run(
+            ["sui", "keytool", "generate", "ed25519", "--json"],
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30, cwd=_td,
+        )
+        if admin_result.returncode != 0:
+            raise RuntimeError(f"sui keytool generate admin failed: {admin_result.stderr}")
+        admin_data = json.loads(admin_result.stdout)
+        admin_address = admin_data["suiAddress"]
+        admin_key_file = Path(_td) / f"{admin_address}.key"
+        admin_base64_key = admin_key_file.read_text().strip()
+
+    with _tempfile.TemporaryDirectory() as _td:
+        player_result = subprocess.run(
+            ["sui", "keytool", "generate", "ed25519", "--json"],
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30, cwd=_td,
+        )
+        if player_result.returncode != 0:
+            raise RuntimeError(f"sui keytool generate player failed: {player_result.stderr}")
+        player_data = json.loads(player_result.stdout)
+        player_address = player_data["suiAddress"]
+        player_key_file = Path(_td) / f"{player_address}.key"
+        player_base64_key = player_key_file.read_text().strip()
+
+    # Create admin client config and keystore
+    admin_config = str(config_dir / "client.yaml")
+    admin_keystore = str(config_dir / "sui.keystore")
+    Path(admin_keystore).write_text(json.dumps([admin_base64_key]))
+    sui_write_client_config(admin_config, rpc_url, admin_address, admin_keystore)
+
+    # Get bech32-encoded private key for player credentials
+    admin_secret = subprocess.run(
+        ["sui", "keytool", "convert", "--json", admin_base64_key],
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30,
+    )
+    admin_bech32 = json.loads(admin_secret.stdout).get("bech32WithFlag", admin_base64_key) if admin_secret.returncode == 0 else admin_base64_key
+
+    # Create player client config and keystore
+    player_config = str(config_dir / "player" / "client.yaml")
+    player_keystore = str(config_dir / "player" / "sui.keystore")
+    Path(player_config).parent.mkdir(parents=True, exist_ok=True)
+    Path(player_keystore).write_text(json.dumps([player_base64_key]))
+    sui_write_client_config(player_config, rpc_url, player_address, player_keystore)
+
+    player_secret = subprocess.run(
+        ["sui", "keytool", "convert", "--json", player_base64_key],
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30,
+    )
+    player_bech32 = json.loads(player_secret.stdout).get("bech32WithFlag", player_base64_key) if player_secret.returncode == 0 else player_base64_key
+
+    for _ in range(30):
+        try:
+            sui_fund_account(faucet_url, admin_address)
+            break
+        except Exception:
+            time.sleep(1)
+    else:
+        raise RuntimeError(f"Failed to fund admin account {admin_address}")
+
+    node_accounts = [
+        AccountInfo(
+            address=admin_address,
+            private_key=admin_bech32,
+            public_key=admin_address,
+        ),
+        AccountInfo(
+            address=player_address,
+            private_key=player_bech32,
+            public_key=player_address,
+        ),
+    ]
+
+    node_info = NodeInfo(
+        port=str(rpc_port),
+        accounts=node_accounts,
+        pid=sui_process.pid,
+        uuid=node_uuid,
+        team=team_id,
+        seed=json.dumps({
+            "rpc_url": rpc_url,
+            "faucet_url": faucet_url,
+            "config_dir": str(config_dir),
+            "admin_config": admin_config,
+            "player_config": player_config,
+        }),
+    )
+
+    schedule_node_termination(node_info)
+    return node_info
+
 # Main blockchain manager class
 class BlockchainManager:
-    def __init__(self, blockchain_type: Literal["cairo", "eth", "solana"]):
+    def __init__(self, blockchain_type: Literal["cairo", "eth", "solana", "sui"]):
         self.blockchain_type = blockchain_type
         self.client = self._initialize_client()
 
@@ -340,6 +492,8 @@ class BlockchainManager:
             return CairoFullNodeClient("http://127.0.0.1:8545")
         elif self.blockchain_type == "eth":
             return Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))
+        elif self.blockchain_type == "sui":
+            return None
         return None
 
     async def start_instance(
@@ -360,6 +514,8 @@ class BlockchainManager:
             node_info = await self._start_ethereum_instance(team_id, deploy_handler)
         elif self.blockchain_type == "solana":
             node_info = await self._start_solana_instance(team_id, deploy_handler)
+        elif self.blockchain_type == "sui":
+            node_info = self._start_sui_instance(team_id, deploy_handler)
 
         if not node_info:
             raise RuntimeError("Failed to create blockchain instance")
@@ -435,6 +591,8 @@ class BlockchainManager:
             return self._check_ethereum_solution(node_info)
         elif self.blockchain_type == "solana":
             return await self._check_solana_solution(node_info)
+        elif self.blockchain_type == "sui":
+            return self._check_sui_solution(node_info)
         return False
 
     async def _check_cairo_solution(self, node_info: NodeInfo) -> bool:
@@ -462,6 +620,39 @@ class BlockchainManager:
         # program_id = Pubkey(node_info.contract_addr)
         is_solved = await solana_is_solved(client, system_keypair, context_keypair)
         return is_solved
+
+    def _start_sui_instance(self, team_id: str, deploy_handler):
+        node_info = launch_sui_node(team_id)
+        seed_data = json.loads(node_info.seed)
+        rpc_url = seed_data["rpc_url"]
+        faucet_url = seed_data["faucet_url"]
+        admin_config = seed_data["admin_config"]
+        admin_address = node_info.accounts[0].address
+        player_address = node_info.accounts[1].address
+
+        contract_addr = deploy_handler(rpc_url, admin_config, admin_address, player_address)
+        node_info.contract_addr = contract_addr
+
+        for _ in range(30):
+            try:
+                sui_fund_account(faucet_url, player_address)
+                break
+            except Exception:
+                time.sleep(1)
+
+        return node_info
+
+    def _check_sui_solution(self, node_info: NodeInfo) -> bool:
+        seed_data = json.loads(node_info.seed)
+        rpc_url = seed_data["rpc_url"]
+        try:
+            contract_data = json.loads(node_info.contract_addr)
+            challenge_object_id = contract_data.get("challenge_object_id")
+        except (json.JSONDecodeError, TypeError, AttributeError):
+            return False
+        if not challenge_object_id:
+            return False
+        return sui_check_solved(rpc_url, challenge_object_id)
 
 # Global instance initialization
 BLOCKCHAIN_MANAGER = BlockchainManager(BLOCKCHAIN_TYPE)

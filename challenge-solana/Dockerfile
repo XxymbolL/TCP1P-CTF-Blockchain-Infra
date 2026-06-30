@@ -1,4 +1,4 @@
-FROM dimasmaualana/solana:latest
+FROM xxymboll/solana:latest
 
 WORKDIR /home/ctf/
 COPY ./setup/package.json ./setup/package.json

@@ -52,6 +52,10 @@ class AppConfig:
         "solana": {
             "blocked_namespaces": ["requestAirdrop"],
             "blocked_methods": []
+        },
+        "sui": {
+            "allowed_prefixes": ["sui_", "suix_", "unsafe_", "rpc."],
+            "blocked_methods": ["sui_dryRunTransactionBlock", "unsafe_devInspectTransactionBlock"]
         }
     }
     
@@ -245,6 +249,14 @@ def proxy_request(uuid: str):
             if any(method.startswith(ns) for ns in rules["blocked_namespaces"]):
                 return jsonrpc_error(-32601, "Method not allowed", data.get("id"))
         
+        elif blockchain_type == "sui":
+            allowed_prefixes = rules.get("allowed_prefixes", [])
+            blocked_methods = rules.get("blocked_methods", [])
+            if method in blocked_methods:
+                return jsonrpc_error(-32601, "Method not allowed", data.get("id"))
+            if not any(method.startswith(prefix) for prefix in allowed_prefixes):
+                return jsonrpc_error(-32601, "Method not allowed", data.get("id"))
+        
         # Forward request to node
         response = requests.post(
             f"http://127.0.0.1:{node_info.port}/",
@@ -407,6 +419,15 @@ def generate_session_data(node_info: NodeInfo) -> dict:
             "1": {"PLAYER_KEYPAIR": node_info.accounts[1].private_key},
             "2": {"CTX_PUBKEY": node_info.accounts[2].public_key},
             "3": {"PROGRAM_ID": node_info.contract_addr},
+        })
+    elif BLOCKCHAIN_MANAGER.blockchain_type == "sui":
+        import json
+        contract_data = json.loads(node_info.contract_addr) if node_info.contract_addr else {}
+        base_data.update({
+            "1": {"PRIVKEY": node_info.accounts[1].private_key},
+            "2": {"PACKAGE_ID": contract_data.get("package_id", node_info.contract_addr)},
+            "3": {"CHALLENGE_OBJECT_ID": contract_data.get("challenge_object_id", "")},
+            "4": {"WALLET_ADDR": node_info.accounts[1].address},
         })
     else:
         base_data.update({
