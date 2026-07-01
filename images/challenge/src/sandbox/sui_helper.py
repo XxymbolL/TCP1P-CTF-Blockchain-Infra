@@ -50,7 +50,7 @@ def call_function(
     *,
     args: list[str] | None = None,
     gas_budget: int | None = None,
-) -> str:
+) -> dict:
     budget = gas_budget or SUI_GAS_BUDGET
     cmd = [
         "sui", "client", "--client.config", client_config,
@@ -69,7 +69,7 @@ def call_function(
             f"sui client call failed: {package_id}::{module}::{function}: "
             f"stdout={result.stdout[-2000:]} stderr={result.stderr[-2000:]}"
         )
-    return result.stdout.strip()
+    return json.loads(result.stdout)
 
 
 def get_object_id_by_type(
@@ -98,6 +98,20 @@ def get_object_id_by_type(
     objects = data.get("result", {}).get("data", [])
     if objects:
         return objects[0]["data"]["objectId"]
+    return None
+
+
+def find_created_object(tx_result: dict) -> str | None:
+    for change in tx_result.get("objectChanges", []):
+        owner = change.get("owner", {})
+        if isinstance(owner, dict) and "Shared" in owner:
+            return change.get("objectId") or change.get("objectID")
+    effects = tx_result.get("effects", {})
+    for obj in effects.get("created", []):
+        owner = obj.get("owner", {})
+        if isinstance(owner, dict) and "Shared" in owner:
+            ref = obj.get("reference", {})
+            return ref.get("objectId") or ref.get("objectID")
     return None
 
 
